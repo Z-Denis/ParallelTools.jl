@@ -11,6 +11,9 @@ mutable struct ConcurrentSaver{R<:RemoteChannel} <: AbstractSaver
     fpath::String
 end
 
+#function ConcurrentSaver(r::RemoteChannel, pid::Int, )
+# TO DO: check that the remote channel points to the right process (readout_ch.id == s.process_id)
+
 #=
 mutable struct ConcurrentSaver{:indefinite_load_size} <: AbstractSaver
     readout_channel::RemoteChannel
@@ -21,11 +24,11 @@ mutable struct ConcurrentSaver{:indefinite_load_size} <: AbstractSaver
 end
 =#
 
-function launch_saver(s::ConcurrentSaver{R}) where {R<:RemoteChannel}
+function launch_saver!(s::ConcurrentSaver{R}) where {R<:RemoteChannel}
     @spawnat s.process_id _launch_saver(s)
 end
 
-function _launch_saver(s::ConcurrentSaver{R}) where {R<:RemoteChannel}
+function _launch_saver!(s::ConcurrentSaver{R}) where {R<:RemoteChannel}
     Npackets::Int = s.rem_packets
 
     if s.progressbar
@@ -37,17 +40,20 @@ function _launch_saver(s::ConcurrentSaver{R}) where {R<:RemoteChannel}
     jldopen(s.fpath, "a+") do file
         println("Saving data to ",s.fpath)
 
-        for i in 1:Npackets
+        while s.rem_packets > 0
             # Retrieve a queued result
             n, sol = take!(s.readout_channel);
+            s.rem_packets -= 1;
             for (key, val) in sol
-                file["paramset_$n/" * key] = val;
+                file["$n/" * key] = val;
             end
             s.progressbar ? ProgressMeter.next!(progress) : nothing;
         end
         # Set progress bar to 100%
         if s.progressbar && (progress.counter < Npackets) ProgressMeter.update!(progress, Npackets); end;
     end
+
+    s.active = false
 
     nothing
 end;
@@ -74,13 +80,17 @@ macro with_saver(s, expr)
 
     index = expr.args[end].args[1].args[]
     old_inner_expr = expr.args[end].args[end]
-    rvals = old_inner_expr.args[end].args
-    # TO DO: check "return"
-    rexpr = Expr(:tuple, :i, Expr(:call, :Dict, [Expr(:call,:(=>),:($rv_str), rv) for (rv_str, rv) in zip(string.(rvals), rvals)]...))
+    rvars = []
+    if length(old_inner_expr.args[end].args) > 1  # No return keyword was used
+        rvars = old_inner_expr.args[end].args
+    else                                          # return was used
+        rvars = old_inner_expr.args[end].args[].args
+    end
+    rexpr = Expr(:tuple, :i, Expr(:call, :Dict, [Expr(:call,:(=>),:($rv_str), rv) for (rv_str, rv) in zip(string.(rvars), rvars)]...))
 
-    esc(quote
+    quote
         @sync begin
-            @spawnat s.process_id ParallelTools._launch_saver(s)
+            @spawnat s.process_id ParallelTools._launch_saver!(s)
             @sync pmap($wp,eachindex($iterable)) do i
                 put!(s.readout_channel,begin
                     $index = $iterable[i]
@@ -91,5 +101,5 @@ macro with_saver(s, expr)
             end
         end
         nothing
-    end) |> prettify
+    end |> esc |> prettify
 end
