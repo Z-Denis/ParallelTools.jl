@@ -3,6 +3,12 @@ uuid = "eb094e40-82c3-11e9-0383-8d1ee7ae030a"
 authors = ["Z-Denis <zakari.denis@gmail.com>"]
 version = "0.1.0"
 
+[deps]
+Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
+ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
+
 [compat]
 julia = "1"
 
