@@ -88,11 +88,12 @@ macro with_saver(s, expr)
     rexpr = Expr(:tuple, :i, Expr(:call, :Dict, [Expr(:call,:(=>),:($rv_str), rv) for (rv_str, rv) in zip(string.(rvars), rvars)]...))
 
     quote
-		@assert !isfile(s.fpath) "$(basename(s.fpath)) already exists at $(dirname(s.fpath))."
-        @sync begin
-            @spawnat s.process_id ParallelTools._launch_saver!(s)
+		@assert typeof($s) <: ConcurrentSaver "@with_saver requires a ConcurrentSaver instance as first parameter."
+		@assert !isfile($s.fpath) basename($s.fpath)*" already exists at "*dirname($s.fpath)*"."
+		@sync begin
+            @spawnat $s.process_id ParallelTools._launch_saver!($s)
             @sync pmap($wp,eachindex($iterable)) do i
-                put!(s.readout_channel,begin
+                put!($s.readout_channel,begin
                     $index = $iterable[i]
                     $(old_inner_expr.args[1:end-1]...)
                     $rexpr
@@ -101,5 +102,19 @@ macro with_saver(s, expr)
             end
         end
         nothing
+    end |> esc |> prettify
+end
+
+macro save_at(fpath, expr)
+    @assert isa(expr, Expr) "Not an expression."
+    @assert  expr.head == :do
+	call = first(expr.args)
+	iterable = last(call.args[2:end][typeof.(call.args[2:end]) .== Symbol])
+    quote
+		@assert typeof($fpath) == String "@save_at requires a valid filename as first parameter."
+		@assert !isfile($fpath) basename($fpath)*" already exists at "*dirname($fpath)*"."
+		let s = ConcurrentSaver(length($iterable), $fpath)
+			@with_saver s $expr
+		end
     end |> esc |> prettify
 end
