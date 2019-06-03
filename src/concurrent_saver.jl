@@ -1,7 +1,15 @@
 using ProgressMeter, JLD2, MacroTools
 
+"""
+The `AbstractSaver` type is the supertype of all saver types of `ParallelTools`.
+"""
 abstract type AbstractSaver end
 
+"""
+ 	ConcurrentSaver{R<:RemoteChannel} <: AbstractSaver
+
+Concurrent saver type.
+"""
 mutable struct ConcurrentSaver{R<:RemoteChannel} <: AbstractSaver
     readout_channel::R
     process_id::Int
@@ -11,6 +19,19 @@ mutable struct ConcurrentSaver{R<:RemoteChannel} <: AbstractSaver
     fpath::String
 end
 
+"""
+	ConcurrentSaver([remch, pid,] npackets, fpath; progressbar=false)
+
+Construct a `ConcurrentSaver` to save to disk results of a pmap in real time
+from a given process.
+
+# Arguments
+* `remch`: `RemoteChannel` instance.
+* `pid`: saver's process id.
+* `npackets`: number of results to be read by the saver.
+* `fpath`: path of the file where data is to be written.
+* `progressbar=false`: if true, a progress bar is displayed.
+"""
 function ConcurrentSaver(r::RemoteChannel, pid::Int, npackets::Int, fpath::String; progressbar::Bool=false)
     @assert pid == r.where "Saver's process must match that of the remote channel."
     @assert npackets > 0 "The number of packets to be read and written to disk must be a natural integer."
@@ -57,6 +78,40 @@ function _launch_saver!(s::ConcurrentSaver{R}) where {R<:RemoteChannel}
     nothing
 end;
 
+"""
+	@with_saver
+
+A macro to save to disk results of a `pmap` call in real time.
+See also: [`@save_to`](@ref)
+
+# Example
+```julia-repl
+julia> saver = ConcurrentSaver(10, "some/valid/path.jld2");
+julia> @with_saver saver pmap(1:10) do x
+							y = x * sqrt(x)
+							y, x^2, x^3
+						end
+julia> jldopen("some/valid/path.jld2","r") do file
+			for i in 1:10
+				group = file[string(i)]
+				println("Iteration ",i)
+		   		for k in keys(group)
+					println(k,"\t=>\t",group[k])
+				end
+			end
+		end
+julia>
+Iteration 1
+x ^ 3   =>  1
+x ^ 2   =>  1
+y   =>  1.0
+Iteration 2
+x ^ 3   =>  8
+x ^ 2   =>  4
+y   =>  2.8284271247461903
+Etc.
+```
+"""
 macro with_saver(s, expr)
     @assert isa(expr, Expr) "Not an expression."
     @assert  expr.head == :do
@@ -105,7 +160,40 @@ macro with_saver(s, expr)
     end |> esc |> prettify
 end
 
-macro save_at(fpath, expr)
+"""
+	@sava_to
+
+A macro to save to disk results of a `pmap` call in real time.
+See also: [`@with_saver`](@ref)
+
+# Example
+```julia-repl
+julia> @save_to "some/valid/path.jld2" pmap(1:10) do x
+							y = x * sqrt(x)
+							y, x^2, x^3
+						end
+julia> jldopen("some/valid/path.jld2","r") do file
+			for i in 1:10
+				group = file[string(i)]
+				println("Iteration ",i)
+		   		for k in keys(group)
+					println(k,"\t=>\t",group[k])
+				end
+			end
+		end
+julia>
+Iteration 1
+x ^ 3   =>  1
+x ^ 2   =>  1
+y   =>  1.0
+Iteration 2
+x ^ 3   =>  8
+x ^ 2   =>  4
+y   =>  2.8284271247461903
+Etc.
+```
+"""
+macro save_to(fpath, expr)
     @assert isa(expr, Expr) "Not an expression."
     @assert  expr.head == :do
 	call = first(expr.args)
