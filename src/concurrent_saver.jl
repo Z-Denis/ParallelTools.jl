@@ -11,18 +11,17 @@ mutable struct ConcurrentSaver{R<:RemoteChannel} <: AbstractSaver
     fpath::String
 end
 
-#function ConcurrentSaver(r::RemoteChannel, pid::Int, )
-# TO DO: check that the remote channel points to the right process (readout_ch.id == s.process_id)
+function ConcurrentSaver(r::RemoteChannel, pid::Int, npackets::Int, fpath::String; progressbar::Bool=false)
+    @assert pid == r.where "Saver's process must match that of the remote channel."
+    @assert npackets > 0 "The number of packets to be read and written to disk must be a natural integer."
+    @assert isdir(dirname(fpath)) "ERROR: accessing "*dirname(fpath)*": No such directory."
+	@assert !isfile(fpath) "$(basename(fpath)) already exists at $(dirname(fpath))."
 
-#=
-mutable struct ConcurrentSaver{:indefinite_load_size} <: AbstractSaver
-    readout_channel::RemoteChannel
-    process_id::Int
-    active::Bool
-    progressbar::Bool
-    fpath::String
+    return ConcurrentSaver{typeof(r)}(r, pid, npackets, true, progressbar, fpath)
 end
-=#
+ConcurrentSaver(r::RemoteChannel, npackets::Int, fpath::String; progressbar::Bool=false) = ConcurrentSaver(r,r.where,npackets,fpath; progressbar=progressbar)
+ConcurrentSaver(pid::Int, npackets::Int, fpath::String; progressbar::Bool=false) = ConcurrentSaver(RemoteChannel(()->Channel{Any}(npackets), pid),pid,npackets,fpath; progressbar=progressbar)
+ConcurrentSaver(npackets::Int, fpath::String; progressbar::Bool=false) = ConcurrentSaver(myid(),npackets,fpath; progressbar=progressbar)
 
 function launch_saver!(s::ConcurrentSaver{R}) where {R<:RemoteChannel}
     @spawnat s.process_id _launch_saver(s)
@@ -89,6 +88,7 @@ macro with_saver(s, expr)
     rexpr = Expr(:tuple, :i, Expr(:call, :Dict, [Expr(:call,:(=>),:($rv_str), rv) for (rv_str, rv) in zip(string.(rvars), rvars)]...))
 
     quote
+		@assert !isfile(s.fpath) "$(basename(s.fpath)) already exists at $(dirname(s.fpath))."
         @sync begin
             @spawnat s.process_id ParallelTools._launch_saver!(s)
             @sync pmap($wp,eachindex($iterable)) do i
